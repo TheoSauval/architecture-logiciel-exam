@@ -77,10 +77,15 @@ public class ReservationService {
                 + "/availability?available=false", null);
 
         // Vérifier le quota du membre
-        long activeCount = reservationRepository
-                .findByMemberIdAndStatus(reservation.getMemberId(), ReservationStatus.CONFIRMED).size();
-        if (activeCount >= member.getMaxConcurrentBookings()) {
-            eventProducer.sendMemberSuspended(reservation.getMemberId());
+        try {
+            long activeCount = reservationRepository
+                    .findByMemberIdAndStatus(reservation.getMemberId(), ReservationStatus.CONFIRMED).size();
+            if (activeCount >= member.getMaxConcurrentBookings()) {
+                eventProducer.sendMemberSuspended(reservation.getMemberId());
+            }
+        } catch (Exception e) {
+            // Kafka non disponible : log sans bloquer la réservation
+            System.err.println("Kafka unavailable, suspension event not sent: " + e.getMessage());
         }
 
         return saved;
@@ -122,14 +127,18 @@ public class ReservationService {
     }
 
     private void checkAndUnsuspendMember(Long memberId) {
-        MemberDto member = restTemplate.getForObject(
-                memberServiceUrl + "/members/" + memberId, MemberDto.class);
-        if (member != null && member.isSuspended()) {
-            long activeCount = reservationRepository
-                    .findByMemberIdAndStatus(memberId, ReservationStatus.CONFIRMED).size();
-            if (activeCount < member.getMaxConcurrentBookings()) {
-                eventProducer.sendMemberUnsuspended(memberId);
+        try {
+            MemberDto member = restTemplate.getForObject(
+                    memberServiceUrl + "/members/" + memberId, MemberDto.class);
+            if (member != null && member.isSuspended()) {
+                long activeCount = reservationRepository
+                        .findByMemberIdAndStatus(memberId, ReservationStatus.CONFIRMED).size();
+                if (activeCount < member.getMaxConcurrentBookings()) {
+                    eventProducer.sendMemberUnsuspended(memberId);
+                }
             }
+        } catch (Exception e) {
+            System.err.println("Kafka unavailable, unsuspension event not sent: " + e.getMessage());
         }
     }
 }
